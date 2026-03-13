@@ -59,9 +59,9 @@ const UserSchema = new Schema(
     resetPasswordTokenExpiry: { type: Date },
 
     role: {
-      type: String,
-      enum: ['customer', 'admin', 'superadmin'],
-      default: 'customer',
+      type: Number,
+      required: true,
+      default: 1,
     },
 
 

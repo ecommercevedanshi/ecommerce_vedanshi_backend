@@ -1,6 +1,5 @@
-const mongoose = require("mongoose");
 
-
+import mongoose from "mongoose"
 const orderItemSchema = new mongoose.Schema({
   product: { type: mongoose.Schema.Types.ObjectId, ref: "Product" },
   variantId: { type: mongoose.Schema.Types.ObjectId },
@@ -38,7 +37,7 @@ const orderSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    invoiceNumber: { type: String, unique: true }, 
+    invoiceNumber: { type: String, unique: true },
     items: [orderItemSchema],
     shippingAddress: shippingAddressSchema,
 
@@ -46,7 +45,7 @@ const orderSchema = new mongoose.Schema(
     subtotal: { type: Number, required: true },
     discountAmount: { type: Number, default: 0 },
     shippingCharge: { type: Number, default: 0 },
-    totalAmount: { type: Number, required: true }, 
+    totalAmount: { type: Number, required: true },
 
     // Coupon
     coupon: { type: mongoose.Schema.Types.ObjectId, ref: "Coupon" },
@@ -56,12 +55,12 @@ const orderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "pending",        
-        "confirmed",      
-        "processing",    
-        "shipped",        
-        "delivered",    
-        "cancelled",      
+        "pending",
+        "confirmed",
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
         "return_requested",
         "returned",
       ],
@@ -74,7 +73,7 @@ const orderSchema = new mongoose.Schema(
       enum: ["pending", "paid", "failed", "refunded", "partially_refunded"],
       default: "pending",
     },
-    paymentMethod: { type: String }, 
+    paymentMethod: { type: String },
     trackingNumber: { type: String },
     courierPartner: { type: String },
 
@@ -105,4 +104,5 @@ orderSchema.pre("save", async function (next) {
   next();
 });
 
-module.exports = mongoose.model("Order", orderSchema);
+const Order = mongoose.model("Order", orderSchema);
+export default Order;

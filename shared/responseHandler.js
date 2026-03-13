@@ -9,6 +9,8 @@ import {
   PutObjectCommand,
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
+import Category from "../modules/categories/categories.model.js";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 
 const s3 = new S3Client({
@@ -205,45 +207,77 @@ class responseHandler {
   }
 
 
-  static async s3FileUpload(
-    file,
-    userId,
-    documentType,
-  ) {
+  // static async s3FileUpload(
+  //   file,
+  //   userId,
+  //   documentType,
+  // ) {
+  //   let fileName = await this.formatFileName(file.name);
+
+  //   const category = await Category.findOne({ name: documentType });
+
+  //   let keyName;
+  //   if (documentType === process.env.FOLDER_MENS) {
+  //     keyName =
+  //       process.env.FOLDER_MENS +
+  //       process.env.SLASH +
+  //       userId +
+  //       process.env.SLASH +
+  //       fileName;
+  //   } else if (documentType === process.env.FOLDER_WOMENS) {
+  //     keyName =
+  //       process.env.FOLDER_WOMENS +
+  //       process.env.SLASH +
+  //       userId +
+  //       process.env.SLASH +
+  //       fileName;
+  //   } else if (documentType === process.env.FOLDER_KIDS) {
+  //     keyName =
+  //       process.env.FOLDER_KIDS +
+  //       process.env.SLASH +
+  //       userId +
+  //       process.env.SLASH +
+  //       fileName;
+  //   } else {
+  //     const extension = await this.getFileExtension(file.name);
+  //     keyName =
+  //       process.env.FOLDER_USERS +
+  //       process.env.SLASH +
+  //       userId +
+  //       process.env.FOLDER_KYC +
+  //       documentType
+  //   }
+
+  //   let fileURL;
+  //   const params = {
+  //     Bucket: db.bucketName,
+  //     Key: keyName,
+  //     ContentType: file.mimetype,
+  //     Body: file.data,
+  //   };
+
+  //   try {
+  //     const command = new PutObjectCommand(params);
+  //     const response = await s3.send(command);
+  //     const fileURL = `https://${db.bucketName}.s3.${db.region}.amazonaws.com/${keyName}`;
+  //     return fileURL;
+  //   } catch (error) {
+  //     console.error("Error uploading file:", error);
+  //   }
+  // }
+
+  // In s3FileUpload — return both url and keyName
+  static async s3FileUpload(file, userId, documentType) {
     let fileName = await this.formatFileName(file.name);
+    const category = await Category.findOne({ name: documentType });
+
     let keyName;
-    if (documentType === process.env.FOLDER_MENS) {
-      keyName =
-        process.env.FOLDER_MENS +
-        process.env.SLASH +
-        userId +
-        process.env.SLASH +
-        fileName;
-    } else if (documentType === process.env.FOLDER_WOMENS) {
-      keyName =
-        process.env.FOLDER_WOMENS +
-        process.env.SLASH +
-        userId +
-        process.env.SLASH +
-        fileName;
-    } else if (documentType === process.env.FOLDER_KIDS) {
-      keyName =
-        process.env.FOLDER_KIDS +
-        process.env.SLASH +
-        userId +
-        process.env.SLASH +
-        fileName;
+    if (category) {
+      keyName = `${category.slug}/${userId}/${fileName}`;
     } else {
-      const extension = await this.getFileExtension(file.name);
-      keyName =
-        process.env.FOLDER_USERS +
-        process.env.SLASH +
-        userId +
-        process.env.FOLDER_KYC +
-        documentType
+      keyName = `${process.env.FOLDER_USERS}/${userId}${process.env.FOLDER_KYC}${documentType}`;
     }
 
-    let fileURL;
     const params = {
       Bucket: db.bucketName,
       Key: keyName,
@@ -253,13 +287,36 @@ class responseHandler {
 
     try {
       const command = new PutObjectCommand(params);
-      const response = await s3.send(command);
+      await s3.send(command);
       const fileURL = `https://${db.bucketName}.s3.${db.region}.amazonaws.com/${keyName}`;
-      return fileURL;
+      return { url: fileURL, key: keyName }; // ✅ return both
     } catch (error) {
       console.error("Error uploading file:", error);
     }
   }
+
+
+  static async generatePreSignedURL(keyName) {
+    try {
+      const signedUrlExpireSeconds = 60 * 60;
+      const params = {
+        Bucket: db.bucketName,
+        Key: keyName,
+      };
+      // Generate presigned URL
+      const command = new GetObjectCommand(params);
+      const presignedUrl = await getSignedUrl(s3, command, {
+        expiresIn: signedUrlExpireSeconds,
+      });
+      return presignedUrl;
+    } catch (error) {
+      console.error("Error generating presigned URL:", error);
+      return null;
+    }
+  }
+
+
+
 
 }
 

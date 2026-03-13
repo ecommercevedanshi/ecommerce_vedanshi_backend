@@ -1,6 +1,7 @@
 import express from "express";
 
 import CategoryController from "./categories.controller.js";
+import { Auth, verifyAdmin } from "../../shared/middleware/authenticate.js";
 
 const router = express.Router();
 

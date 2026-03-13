@@ -3,9 +3,7 @@ import responseHandler from "../../shared/responseHandler.js";
 
 class CategoryController {
 
-    //  USER SIDE
 
-    // GET /api/categories  (all parent categories)
     static async getAllCategories(req, res, next) {
         try {
             const categories = await Category.find({
@@ -18,7 +16,6 @@ class CategoryController {
         }
     }
 
-    // GET /api/categories/:slug/subcategories
     static async getSubCategories(req, res, next) {
         try {
             const { slug } = req.params;
@@ -42,11 +39,10 @@ class CategoryController {
         }
     }
 
-    // 🔐 ADMIN SIDE
+    //  ADMIN SIDE
 
     static async adminGetAllCategories(req, res, next) {
         try {
-            // Fetch all categories without any filter, pagination, or populate
             const categories = await Category.find().sort({ sortOrder: 1 });
 
             return responseHandler.sendSuccessResponse(res, "All categories fetched", {
@@ -79,7 +75,7 @@ class CategoryController {
 
     static async createCategory(req, res, next) {
         try {
-            const { name, slug, image, parent, isActive, sortOrder } = req.body;
+            const { name, slug, image, parent, isActive, thumbnail, sortOrder } = req.body;
 
             if (!name || !slug) {
                 return responseHandler.sendfailureResponse(res, "Name and slug are required", 400);
@@ -106,6 +102,7 @@ class CategoryController {
                 parent: parent || null,
                 isActive,
                 sortOrder,
+                thumbnail
             });
 
             return responseHandler.sendSuccessResponse(res, "Category created successfully", category, 201);
@@ -117,7 +114,8 @@ class CategoryController {
     static async updateCategory(req, res, next) {
         try {
             const { id } = req.params;
-            const { name, slug, parent, isActive, sortOrder } = req.body;
+            const { name, slug, parent, isActive, sortOrder, thumbnail } = req.body;
+            console.log(thumbnail, 'thumbnail')
 
             // Find the category by ID
             const category = await Category.findById(id);
@@ -141,6 +139,7 @@ class CategoryController {
                 }
             }
 
+            console.log(category.thumbnail, "category.thumbnail")
             // Update fields
             if (name) category.name = name;
             if (slug) category.slug = slug;
@@ -148,6 +147,10 @@ class CategoryController {
             if (parent !== undefined) category.parent = parent;
             if (isActive !== undefined) category.isActive = isActive;
             if (sortOrder !== undefined) category.sortOrder = sortOrder;
+            if (thumbnail !== undefined) category.thumbnail = thumbnail;
+
+
+
 
             await category.save();
 
@@ -164,17 +167,21 @@ class CategoryController {
                 return responseHandler.sendfailureResponse(res, "Category not found", 404);
             }
 
-            console.log(category, "category33")
             // Check if category has subcategories
             const hasSubCategories = await Category.findOne({ parent: req.params.id });
             if (hasSubCategories) {
                 return responseHandler.sendfailureResponse(res, "Cannot delete category with subcategories", 400);
             }
 
-            category.isActive = false;
+            // Toggle isActive
+            category.isActive = !category.isActive;
             await category.save();
 
-            return responseHandler.sendSuccessResponse(res, "Category deleted successfully");
+            const message = category.isActive
+                ? "Category activated successfully"
+                : "Category deactivated successfully";
+
+            return responseHandler.sendSuccessResponse(res, message, category);
         } catch (error) {
             next(error);
         }

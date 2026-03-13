@@ -15,9 +15,7 @@ const categorySchema = new mongoose.Schema(
             lowercase: true
         },
 
-        image: {
-            type: String
-        },
+
 
         parent: {
             type: String,
@@ -34,10 +32,10 @@ const categorySchema = new mongoose.Schema(
             type: Number,
             default: 0
         },
+
         thumbnail: {
-            type: String,
-            default: null
-        }
+             type : String           
+         }
 
     },
     { timestamps: true }

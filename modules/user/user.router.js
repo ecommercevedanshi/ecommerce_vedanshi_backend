@@ -20,11 +20,11 @@ router.post("/resend-otp", UserController.resendOtp);
 router.post("/forgot-password", validation, UserController.forgotPassword);
 // router.post("/verify-forgot-otp", UserController.verifyForgotOtp);
 router.post("/reset-password", UserController.resetPassword);
-router.get("/refreshToken", UserController.refreshToken);
+router.post("/refreshToken", UserController.refreshToken);
 router.get("/get-allusers", UserController.resetPassword);
 
 router.post("/logout", Auth, UserController.logout);
-router.put("/profile/update/:id",  UserController.updateProfile);
+router.put("/profile/update/:id", UserController.updateProfile);
 
 
 export default router;

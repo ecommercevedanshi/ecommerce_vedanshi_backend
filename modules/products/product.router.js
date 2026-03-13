@@ -6,6 +6,7 @@ const router = express.Router();
 
 //  USER ROUTES (public)
 router.get("/", ProductController.getAllProducts);
+router.get("/product-details/:id", ProductController.getAllProducts);
 router.get("/featured", ProductController.getFeaturedProducts);
 router.get("/new-arrivals", ProductController.getNewArrivals);
 router.get("/search", ProductController.searchProducts);

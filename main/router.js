@@ -4,6 +4,9 @@ import responseHandler from "../shared/responseHandler.js";
 import userRouter from "../modules/user/user.router.js"
 import productsRouter from "../modules/products/product.router.js"
 import categoryRouter from "../modules/categories/categories.router.js"
+import couponsRouter from "../modules/coupon/coupon.router.js"
+import orderRouter from "../modules/orders/orders.router.js"
+import mediaRouter from "../modules/media/media.router.js"
 
 let router = Router();
 
@@ -14,6 +17,10 @@ router.get("/", (req, res) => {
 router.use("/user", userRouter);
 router.use("/products", productsRouter)
 router.use("/category", categoryRouter)
+router.use("/coupons", couponsRouter)
+router.use("/order", orderRouter)
+
+router.use("/media", mediaRouter)
 
 
 export default router;

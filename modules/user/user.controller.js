@@ -3,10 +3,18 @@ import responseHandler from "../../shared/responseHandler.js";
 import jwt from "jsonwebtoken";
 
 class UserController {
-
   static async register(req, res, next) {
     try {
-      let { name, email, phone, password, confirmPassword } = req.body;
+
+      // ✅ generate unique username like first code
+      var username;
+      while (true) {
+        username = await responseHandler.generateRandomUsername();
+        const exists = await User.exists({ username: "VEDANSHI" + username });
+        if (!exists) break;
+      }
+
+      let { name, email, phone, password, confirmPassword } = req.body; // ✅ no role from body
 
       if (!name || !email || !phone || !password || !confirmPassword) {
         return responseHandler.sendfailureResponse(res, "All fields are required", 400);
@@ -19,10 +27,8 @@ class UserController {
       email = email.toLowerCase();
       req.body.email = email;
 
-      let findEmail = await User.findOne({
-        email: email,
-        isDeleted: false,
-      }).lean();
+      let findEmail = await User.findOne({ email, isDeleted: false }).lean();
+      console.log(findEmail ,"fondemail")
 
       if (findEmail && !findEmail.isVerified) {
         return responseHandler.sendfailureResponse(res, "User verification pending", 400);
@@ -32,37 +38,38 @@ class UserController {
         return responseHandler.sendfailureResponse(res, "Email already exists", 400);
       }
 
-      let findPhone = await User.findOne({
-        phone: phone,
-        isDeleted: false,
-      });
-
+      let findPhone = await User.findOne({ phone, isDeleted: false });
       if (findPhone) {
         return responseHandler.sendfailureResponse(res, "Phone already exists", 400);
       }
 
       let otp_number = await responseHandler.generateOTP();
-      var username = await responseHandler.generateRandomUsername();
-      req.body.username = "VEDANSHI" + username;
-      const finalusername = req.body.username;
 
+      // ✅ sanitize name
+      name = (req.body.name || "").replace(/[^A-Za-z.\s]/g, "");
+
+      req.body.name = name;
+      req.body.username = "VEDANSHI" + username;
       req.body.password = await responseHandler.hashPassword(password);
       req.body.otp = otp_number;
       req.body.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+      req.body.role = 1;          // ✅ always user — never from body
+      req.body.isVerified = false;
+      req.body.isActive = false;
+      req.body.isBlock = false;
 
       const createUser = await User.create(req.body);
 
-      // Send OTP via email
       responseHandler.nodeMailer(createUser.email, otp_number);
 
       return responseHandler.sendSuccessResponse(
         res,
         "User registered successfully. Please verify with OTP.",
         {
-          email: email,
-          phone: phone,
+          email,
+          phone,
           userId: createUser._id,
-          username: finalusername,
+          username: req.body.username,
         }
       );
     } catch (error) {
@@ -235,9 +242,11 @@ class UserController {
       next(error);
     }
   }
+
+
   static async login(req, res, next) {
     try {
-      let { email, password } = req.body;
+      let { email, password, role } = req.body;
 
       if (!email || !password) {
         return responseHandler.sendfailureResponse(res, "Email and password are required");
@@ -295,7 +304,19 @@ class UserController {
       delete responseUser.password;
       responseUser.token = accessToken;
 
-      return responseHandler.sendSuccessResponse(res, "Login successful", responseUser);
+      const response = {
+        id: responseUser._id,
+        name: responseUser.name,
+        email: responseUser.email,
+        role: responseUser.role,
+        token: accessToken,
+        refreshToken: refreshToken
+
+      }
+
+
+
+      return responseHandler.sendSuccessResponse(res, "Login successful", response);
     } catch (error) {
       next(error);
     }
@@ -431,6 +452,7 @@ class UserController {
     try {
       // Access token from Authorization header
       const authHeader = req.headers["authorization"];
+      console.log(authHeader ,"authheader" )
       const accessToken = authHeader && authHeader.split(" ")[1];
 
       // Refresh token from body
@@ -472,10 +494,16 @@ class UserController {
         { expiresIn: "7d" }
       );
 
-      return helper.success(res, "Tokens Refreshed Successfully", {
-        accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
+      return res.status(200).json({
+        success: true,
+        message: "Tokens Refreshed Successfully",
+        data: {
+          accessToken: newAccessToken,
+          refreshToken: newRefreshToken,
+        }
       });
+
+
 
     } catch (error) {
       next(error);
@@ -602,11 +630,11 @@ class UserController {
 
   static async updateProfile(req, res, next) {
     try {
-      const {id} = req.params;
+      const { id } = req.params;
       const { name, username, gender, dateOfBirth, profileImage, address } = req.body;
 
       const user = await User.findById(id);
-      console.log(user,'users')
+      console.log(user, 'users')
 
       if (!user) {
         return responseHandler.sendfailureResponse(res, "User not found", 404);
@@ -620,7 +648,7 @@ class UserController {
         }
       }
 
-      console.log(address,"user.addresses")
+      console.log(address, "user.addresses")
       if (name) user.name = name;
       if (username) user.username = username.toLowerCase();
       if (gender) user.gender = gender;
