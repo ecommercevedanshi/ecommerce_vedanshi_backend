@@ -172,6 +172,7 @@ for (const item of responseItems) {
             subtotal: order.subtotal,
             paymentMethod: order.paymentMethod,
             paymentStatus: order.paymentStatus,
+            statusHistory: order.statusHistory,
             expectedDeliveryAt: order.expectedDeliveryAt,
           },
         },
@@ -360,7 +361,7 @@ for (const item of responseItems) {
 
       // find by orderId + user so customer can only cancel their own order
       const order = await Order.findOne({
-        id,
+        _id: new mongoose.Types.ObjectId(id),
         user: new mongoose.Types.ObjectId(userId),
       });
 

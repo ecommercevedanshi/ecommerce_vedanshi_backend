@@ -8,6 +8,7 @@ import couponsRouter from "../modules/coupon/coupon.router.js"
 import orderRouter from "../modules/orders/orders.router.js"
 import mediaRouter from "../modules/media/media.router.js";
 import cartRouter from "../modules/cart/cart.router.js";
+import wishlistRouter from "../modules/wishlist/wishlist.router.js";
 
 let router = Router();
 
@@ -19,6 +20,7 @@ router.use("/user", userRouter);
 router.use("/products", productsRouter)
 router.use("/category", categoryRouter)
 router.use("/cart", cartRouter)
+router.use("/wishlist", wishlistRouter)
 router.use("/coupons", couponsRouter)
 router.use("/orders", orderRouter)
 

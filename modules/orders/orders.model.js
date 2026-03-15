@@ -18,6 +18,13 @@ const orderItemSchema = new mongoose.Schema({
   },
 });
 
+// add this schema before orderSchema
+const statusHistorySchema = new mongoose.Schema({
+  status: { type: String },
+  changedAt: { type: Date, default: Date.now },
+  note: { type: String },
+}, { _id: false });
+
 
 const shippingAddressSchema = new mongoose.Schema({
   fullName: String,
@@ -83,6 +90,10 @@ const orderSchema = new mongoose.Schema(
     cancelledAt: { type: Date },
 
     adminNotes: { type: String },
+    statusHistory: [statusHistorySchema],
+
+cancellationReason: { type: String },
+returnReason: { type: String },
   },
   { timestamps: true }
 );
