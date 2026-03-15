@@ -24,7 +24,8 @@ router.post("/refreshToken", UserController.refreshToken);
 router.get("/get-allusers", UserController.resetPassword);
 
 router.post("/logout", Auth, UserController.logout);
-router.put("/profile/update/:id", UserController.updateProfile);
+router.get("/profile/:id", UserController.getProfile);
+router.put("/profile/update/:id", Auth, UserController.updateProfile);
 
 
 export default router;

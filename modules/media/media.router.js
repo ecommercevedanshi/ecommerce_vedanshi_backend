@@ -21,12 +21,11 @@ router.put(
     MediaController.updateMedia
 );
 
-router.get("/get-all-media", MediaController.getAllMedia);
+router.get("/get-all-media", Auth, verifyAdmin, MediaController.getAllMedia);
 
 // Get media by entity
 router.get(
     "/entity/:entityId",
-
     MediaController.getMedia
 );
 

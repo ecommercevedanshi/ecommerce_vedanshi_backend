@@ -5,7 +5,6 @@ import jwt from "jsonwebtoken";
 class UserController {
   static async register(req, res, next) {
     try {
-
       // ✅ generate unique username like first code
       var username;
       while (true) {
@@ -17,30 +16,50 @@ class UserController {
       let { name, email, phone, password, confirmPassword } = req.body; // ✅ no role from body
 
       if (!name || !email || !phone || !password || !confirmPassword) {
-        return responseHandler.sendfailureResponse(res, "All fields are required", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "All fields are required",
+          400,
+        );
       }
 
       if (password !== confirmPassword) {
-        return responseHandler.sendfailureResponse(res, "Passwords do not match", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Passwords do not match",
+          400,
+        );
       }
 
       email = email.toLowerCase();
       req.body.email = email;
 
       let findEmail = await User.findOne({ email, isDeleted: false }).lean();
-      console.log(findEmail ,"fondemail")
+      console.log(findEmail, "fondemail");
 
       if (findEmail && !findEmail.isVerified) {
-        return responseHandler.sendfailureResponse(res, "User verification pending", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "User verification pending",
+          400,
+        );
       }
 
       if (findEmail && findEmail.isVerified && !findEmail.isDeleted) {
-        return responseHandler.sendfailureResponse(res, "Email already exists", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Email already exists",
+          400,
+        );
       }
 
       let findPhone = await User.findOne({ phone, isDeleted: false });
       if (findPhone) {
-        return responseHandler.sendfailureResponse(res, "Phone already exists", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Phone already exists",
+          400,
+        );
       }
 
       let otp_number = await responseHandler.generateOTP();
@@ -53,7 +72,7 @@ class UserController {
       req.body.password = await responseHandler.hashPassword(password);
       req.body.otp = otp_number;
       req.body.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
-      req.body.role = 1;          // ✅ always user — never from body
+      req.body.role = 1; // ✅ always user — never from body
       req.body.isVerified = false;
       req.body.isActive = false;
       req.body.isBlock = false;
@@ -70,7 +89,7 @@ class UserController {
           phone,
           userId: createUser._id,
           username: req.body.username,
-        }
+        },
       );
     } catch (error) {
       next(error);
@@ -105,7 +124,6 @@ class UserController {
   //     // responseHandler.nodeMailer(email, otp_number);
   //     // responseHandler.SmsOtp(phone, otp_number, "register");
 
-
   //     return responseHandler.sendSuccessResponse(res, "OTP sent successfully", {
   //       email: email,
   //       phone: phone,
@@ -115,13 +133,16 @@ class UserController {
   //   }
   // }
 
-
   static async resendOtp(req, res, next) {
     try {
       let { email } = req.body;
 
       if (!email) {
-        return responseHandler.sendfailureResponse(res, "Email is required", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Email is required",
+          400,
+        );
       }
 
       email = email.toLowerCase();
@@ -136,7 +157,11 @@ class UserController {
       }
 
       if (findUser.isVerified) {
-        return responseHandler.sendfailureResponse(res, "User already verified", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "User already verified",
+          400,
+        );
       }
 
       // Generate new OTP and save to user
@@ -150,19 +175,26 @@ class UserController {
       // Send OTP via email
       responseHandler.nodeMailer(email, otp_number);
 
-      return responseHandler.sendSuccessResponse(res, "OTP resent successfully", { email });
+      return responseHandler.sendSuccessResponse(
+        res,
+        "OTP resent successfully",
+        { email },
+      );
     } catch (error) {
       next(error);
     }
   }
-
 
   static async verifyOtp(req, res, next) {
     try {
       let { email, otp } = req.body;
 
       if (!email || !otp) {
-        return responseHandler.sendfailureResponse(res, "Email and OTP are required", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Email and OTP are required",
+          400,
+        );
       }
 
       email = email.toLowerCase();
@@ -193,13 +225,13 @@ class UserController {
       const accessToken = jwt.sign(
         { userId: findUser._id },
         process.env.JWT_SK,
-        { expiresIn: "7m" }
+        { expiresIn: "7m" },
       );
 
       const refreshToken = jwt.sign(
         { userId: findUser._id },
         process.env.JWT_REFRESH_SK,
-        { expiresIn: "30d" }
+        { expiresIn: "30d" },
       );
 
       // Update user as verified, clear OTP, save refresh token
@@ -232,58 +264,74 @@ class UserController {
       delete updatedUser.otpExpiry;
       delete updatedUser.refreshToken;
 
-      return responseHandler.sendSuccessResponse(res, "User verified successfully", {
-        ...updatedUser,
-        accessToken,
-        refreshToken,
-      });
-
+      return responseHandler.sendSuccessResponse(
+        res,
+        "User verified successfully",
+        {
+          ...updatedUser,
+          token: accessToken,
+          refreshToken,
+        },
+      );
     } catch (error) {
       next(error);
     }
   }
-
 
   static async login(req, res, next) {
     try {
       let { email, password, role } = req.body;
 
       if (!email || !password) {
-        return responseHandler.sendfailureResponse(res, "Email and password are required");
+        return responseHandler.sendfailureResponse(
+          res,
+          "Email and password are required",
+        );
       }
 
       email = email.toLowerCase();
-      console.log(email, "email")
+      console.log(email, "email");
       const user = await User.findOne({ email, isDeleted: false });
 
       if (!user) {
-        return responseHandler.sendfailureResponse(res, "Invalid email or password");
+        return responseHandler.sendfailureResponse(
+          res,
+          "Invalid email or password",
+        );
       }
 
       if (!user.isVerified) {
-        return responseHandler.sendfailureResponse(res, "Please verify your account first");
+        return responseHandler.sendfailureResponse(
+          res,
+          "Please verify your account first",
+        );
       }
 
-      const isMatch = await responseHandler.comparePassword(password, user.password);
+      const isMatch = await responseHandler.comparePassword(
+        password,
+        user.password,
+      );
       if (!isMatch) {
-        return responseHandler.sendfailureResponse(res, "Invalid email or password");
+        return responseHandler.sendfailureResponse(
+          res,
+          "Invalid email or password",
+        );
       }
 
       const loginTime = Math.floor(Date.now() / 1000);
 
       await User.findByIdAndUpdate(user._id, { loginTime });
 
-
       const accessToken = jwt.sign(
         { userId: user._id, loginTime },
         process.env.JWT_SK,
-        { expiresIn: "7m" }
+        { expiresIn: "7m" },
       );
 
       const refreshToken = jwt.sign(
         { userId: user._id },
         process.env.JWT_REFRESH_SK,
-        { expiresIn: "30d" }
+        { expiresIn: "30d" },
       );
 
       user.refreshToken = refreshToken;
@@ -292,12 +340,14 @@ class UserController {
       res.cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: true,
-        sameSite: "strict", maxAge: 15 * 60 * 1000
+        sameSite: "strict",
+        maxAge: 15 * 60 * 1000,
       });
       res.cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: true,
-        sameSite: "strict", maxAge: 7 * 24 * 60 * 60 * 1000
+        sameSite: "strict",
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
       const responseUser = user.toJSON();
@@ -310,13 +360,14 @@ class UserController {
         email: responseUser.email,
         role: responseUser.role,
         token: accessToken,
-        refreshToken: refreshToken
+        refreshToken: refreshToken,
+      };
 
-      }
-
-
-
-      return responseHandler.sendSuccessResponse(res, "Login successful", response);
+      return responseHandler.sendSuccessResponse(
+        res,
+        "Login successful",
+        response,
+      );
     } catch (error) {
       next(error);
     }
@@ -326,7 +377,11 @@ class UserController {
       const { email, phone } = req.body;
 
       if (!email && !phone) {
-        return responseHandler.sendfailureResponse(res, "Email or phone number is required", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Email or phone number is required",
+          400,
+        );
       }
 
       // Find user by email or phone
@@ -338,11 +393,19 @@ class UserController {
       const findUser = await User.findOne(query);
 
       if (!findUser) {
-        return responseHandler.sendfailureResponse(res, "User not found with the provided details", 404);
+        return responseHandler.sendfailureResponse(
+          res,
+          "User not found with the provided details",
+          404,
+        );
       }
 
       if (!findUser.isVerified) {
-        return responseHandler.sendfailureResponse(res, "Please verify your account first", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Please verify your account first",
+          400,
+        );
       }
 
       // Generate OTP and save to DB
@@ -373,7 +436,10 @@ class UserController {
 
       // Check if identifiers and OTP are provided
       if ((!email && !phone) || !otp) {
-        return responseHandler.sendfailureResponse(res, "Email/phone and OTP are required");
+        return responseHandler.sendfailureResponse(
+          res,
+          "Email/phone and OTP are required",
+        );
       }
 
       // Find user by email or phone
@@ -385,22 +451,27 @@ class UserController {
       const findUser = await User.findOne(query);
 
       if (!findUser) {
-        return responseHandler.sendfailureResponse(res, "User not found with the provided details");
+        return responseHandler.sendfailureResponse(
+          res,
+          "User not found with the provided details",
+        );
       }
-
-
 
       // Generate a temporary token for password reset
       const resetToken = jwt.sign(
         { id: findUser._id, purpose: "reset" },
         process.env.JWT_SK,
-        { expiresIn: "15m" }
+        { expiresIn: "15m" },
       );
 
-      return responseHandler.sendSuccessResponse(res, "OTP verified successfully", {
-        userId: findUser._id,
-        resetToken,
-      });
+      return responseHandler.sendSuccessResponse(
+        res,
+        "OTP verified successfully",
+        {
+          userId: findUser._id,
+          resetToken,
+        },
+      );
     } catch (error) {
       next(error);
     }
@@ -411,11 +482,19 @@ class UserController {
       let { email, newPassword, confirmPassword } = req.body;
 
       if (!email || !newPassword || !confirmPassword) {
-        return responseHandler.sendfailureResponse(res, "All fields are required", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "All fields are required",
+          400,
+        );
       }
 
       if (newPassword !== confirmPassword) {
-        return responseHandler.sendfailureResponse(res, "Passwords do not match", 400);
+        return responseHandler.sendfailureResponse(
+          res,
+          "Passwords do not match",
+          400,
+        );
       }
 
       email = email.toLowerCase();
@@ -427,7 +506,11 @@ class UserController {
       });
 
       if (!findUser) {
-        return responseHandler.sendfailureResponse(res, "User not found or no reset request exists", 404);
+        return responseHandler.sendfailureResponse(
+          res,
+          "User not found or no reset request exists",
+          404,
+        );
       }
 
       // Hash new password
@@ -442,7 +525,10 @@ class UserController {
         loginTime: Math.floor(Date.now() / 1000),
       });
 
-      return responseHandler.sendSuccessResponse(res, "Password reset successfully");
+      return responseHandler.sendSuccessResponse(
+        res,
+        "Password reset successfully",
+      );
     } catch (error) {
       next(error);
     }
@@ -452,7 +538,7 @@ class UserController {
     try {
       // Access token from Authorization header
       const authHeader = req.headers["authorization"];
-      console.log(authHeader ,"authheader" )
+      console.log(authHeader, "authheader");
       const accessToken = authHeader && authHeader.split(" ")[1];
 
       // Refresh token from body
@@ -471,7 +557,9 @@ class UserController {
       try {
         decodedRefresh = jwt.verify(refreshToken, process.env.JWT_REFRESH_SK);
       } catch (err) {
-        return res.status(403).json({ message: "Invalid or Expired Refresh Token" });
+        return res
+          .status(403)
+          .json({ message: "Invalid or Expired Refresh Token" });
       }
 
       // Decode access token without verifying expiration
@@ -482,16 +570,15 @@ class UserController {
 
       // Generate new access token
       const newAccessToken = jwt.sign(
-        { id: decodedAccess.id },
+        { userId: decodedRefresh.userId },
         process.env.JWT_SK,
-        { expiresIn: "10m" }
+        { expiresIn: "10m" },
       );
 
-      // Generate new refresh token
       const newRefreshToken = jwt.sign(
-        { id: decodedRefresh.id },
+        { userId: decodedRefresh.userId },
         process.env.JWT_REFRESH_SK,
-        { expiresIn: "7d" }
+        { expiresIn: "7d" },
       );
 
       return res.status(200).json({
@@ -500,17 +587,12 @@ class UserController {
         data: {
           accessToken: newAccessToken,
           refreshToken: newRefreshToken,
-        }
+        },
       });
-
-
-
     } catch (error) {
       next(error);
     }
   }
-
-
 
   // static async refreshToken(req, res, next) {
   //   try {
@@ -589,7 +671,6 @@ class UserController {
   //       sameSite: "strict", maxAge: 30 * 24 * 60 * 60 * 1000,
   //     });
 
-
   //     return responseHandler.sendSuccessResponse(res, "Tokens refreshed successfully", {
   //       accessToken: newAccessToken,
   //     });
@@ -598,76 +679,142 @@ class UserController {
   //   }
   // }
 
+  // static async logout(req, res, next) {
+  //   try {
+  //     console.log(req.u)
+  //     await User.findByIdAndUpdate(req.admin.id, {
+  //       loginTime: 0,
+  //     });
+  //     return responseHandler.sendSuccessResponse(res, ` Logout Successfully`, {});
+  //   } catch (error) {
+  //     next(error);
+  //   }
+  // }
+
   static async logout(req, res, next) {
     try {
-      await User.findByIdAndUpdate(req.user.id, {
+      const currentUser = req.user || req.admin;
+      const userId = currentUser?.userId || currentUser?._id;
+
+      await User.findByIdAndUpdate(userId, {
         loginTime: 0,
       });
-      return helper.success(res, ` Logout Successfully`, {});
+
+      return responseHandler.sendSuccessResponse(
+        res,
+        "Logout Successfully",
+        {},
+      );
     } catch (error) {
       next(error);
     }
   }
-
-
 
   static async getProfile(req, res, next) {
     try {
-      const userId = req.params;
-
-      const user = await User.findById(userId)
-
-
-      if (!user) {
-        return responseHandler.sendfailureResponse(res, "User not found", 404);
-      }
-
-      return responseHandler.sendSuccessResponse(res, "Profile fetched successfully", user);
-    } catch (error) {
-      next(error);
-    }
-  }
-
-  static async updateProfile(req, res, next) {
-    try {
       const { id } = req.params;
-      const { name, username, gender, dateOfBirth, profileImage, address } = req.body;
 
-      const user = await User.findById(id);
-      console.log(user, 'users')
+      const user = await User.findById(id)
+        .select(
+          "name username email phone addresses createdAt dateOfBirth gender profileImage",
+        )
+        .lean();
 
       if (!user) {
         return responseHandler.sendfailureResponse(res, "User not found", 404);
       }
 
-      // Check username unique if being changed
-      if (username && username !== user.username) {
-        const usernameExists = await User.findOne({ username: username.toLowerCase() });
-        if (usernameExists) {
-          return responseHandler.sendfailureResponse(res, "Username already taken", 400);
-        }
-      }
-
-      console.log(address, "user.addresses")
-      if (name) user.name = name;
-      if (username) user.username = username.toLowerCase();
-      if (gender) user.gender = gender;
-      if (dateOfBirth) user.dateOfBirth = dateOfBirth;
-      if (profileImage) user.profileImage = profileImage;
-      if (address) user.addresses = address;
-
-      await user.save();
-
-      const updatedUser = await User.findById(id)
-
-      return responseHandler.sendSuccessResponse(res, "Profile updated successfully", updatedUser);
+      return responseHandler.sendSuccessResponse(
+        res,
+        "Profile fetched successfully",
+        user,
+      );
     } catch (error) {
       next(error);
     }
   }
 
+  // static async updateProfile(req, res, next) {
+  //   try {
+  //     const { id } = req.params;
+  //     const { name, username, gender, dateOfBirth, profileImage, address } = req.body;
 
+  //     const user = await User.findById(id);
+  //     console.log(user, 'users')
 
+  //     if (!user) {
+  //       return responseHandler.sendfailureResponse(res, "User not found", 404);
+  //     }
+
+  //     // Check username unique if being changed
+  //     if (username && username !== user.username) {
+  //       const usernameExists = await User.findOne({ username: username.toLowerCase() });
+  //       if (usernameExists) {
+  //         return responseHandler.sendfailureResponse(res, "Username already taken", 400);
+  //       }
+  //     }
+
+  //     console.log(address, "user.addresses")
+  //     if (name) user.name = name;
+  //     if (username) user.username = username.toLowerCase();
+  //     if (gender) user.gender = gender;
+  //     if (dateOfBirth) user.dateOfBirth = dateOfBirth;
+  //     if (profileImage) user.profileImage = profileImage;
+  //     if (address) user.addresses = address;
+
+  //     await user.save();
+
+  //     const updatedUser = await User.findById(id)
+
+  //     return responseHandler.sendSuccessResponse(res, "Profile updated successfully", updatedUser);
+  //   } catch (error) {
+  //     next(error);
+  //   }
+  // }
+
+static async updateProfile(req, res, next) {
+  try {
+
+    const { id } = req.params;
+    const { name, gender, dateOfBirth, address } = req.body;
+
+    const user = await User.findById(id);
+
+    if (!user) {
+      return responseHandler.sendfailureResponse(res, "User not found", 404);
+    }
+
+    /* ================= UPDATE FIELDS ================= */
+
+    if (name) {
+      user.name = name;
+    }
+
+    if (gender) {
+      user.gender = gender;
+    }
+
+    if (dateOfBirth) {
+      user.dateOfBirth = dateOfBirth;
+    }
+
+    if (address) {
+      user.addresses =
+        typeof address === "string" ? JSON.parse(address) : address;
+    }
+
+    await user.save();
+
+    return responseHandler.sendSuccessResponse(
+      res,
+      "Profile updated successfully",
+      user
+    );
+
+  } catch (error) {
+    next(error);
+  }
+}
 }
 
 export default UserController;

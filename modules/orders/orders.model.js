@@ -95,13 +95,15 @@ const orderSchema = new mongoose.Schema(
 // orderSchema.index({ createdAt: -1 });
 
 // Auto-generate invoice number before save
-orderSchema.pre("save", async function (next) {
+orderSchema.pre("save", async function () {
+
   if (!this.invoiceNumber) {
     const count = await this.constructor.countDocuments();
     const year = new Date().getFullYear();
+
     this.invoiceNumber = `INV-${year}-${String(count + 1).padStart(6, "0")}`;
   }
-  next();
+
 });
 
 const Order = mongoose.model("Order", orderSchema);

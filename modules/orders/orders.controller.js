@@ -1,462 +1,797 @@
 import Order from "./orders.model.js";
-import cart from "../cart/cart.model.js";
+import Cart from "../cart/cart.model.js";
 import Coupon from "../coupon/coupon.model.js";
 import responseHandler from "../../shared/responseHandler.js";
+import mongoose from "mongoose";
 
 class OrderController {
+  //  USER CONTROLLERS
 
- 
-    static placeOrder = async (req, res) => {
-        try {
-            const { shippingAddress, paymentMethod } = req.body;
+  static placeOrder = async (req, res) => {
+    try {
+      const { shippingAddress, paymentMethod } = req.body;
+      const userId = req.user || req.admin;
 
-            if (!shippingAddress || !paymentMethod)
-                return responseHandler.sendFailureResponse(res, "shippingAddress and paymentMethod are required", 400);
+      // const userId = "69b5224c62a2eed1cf776717"
 
-            // 1. Fetch cart
-            const cart = await Cart.findOne({ user: req.user._id }).populate("items.product");
-            if (!cart || cart.items.length === 0)
-                return responseHandler.sendFailureResponse(res, "Your cart is empty", 400);
+      if (!shippingAddress)
+        return responseHandler.sendfailureResponse(
+          res,
+          "shippingAddress is required",
+          400,
+        );
 
-            // 2. Build order items from cart
-            const items = cart.items.map((item) => ({
-                product:     item.product._id,
-                variantId:   item.variantId,
-                productName: item.productName,
-                size:        item.size,
-                colour:      item.colour,
-                imageUrl:    item.imageUrl,
-                unitPrice:   item.price,
-                quantity:    item.quantity,
-                totalPrice:  item.price * item.quantity,
-            }));
+      if (
+        !shippingAddress.fullName ||
+        !shippingAddress.phone ||
+        !shippingAddress.line1 ||
+        !shippingAddress.city ||
+        !shippingAddress.state ||
+        !shippingAddress.pincode
+      )
+        return responseHandler.sendfailureResponse(
+          res,
+          "Incomplete shipping address",
+          400,
+        );
 
-            // 3. Financials
-            const subtotal = items.reduce((s, i) => s + i.totalPrice, 0);
-            let discountAmount = cart.discountAmount || 0;
-            let couponId       = cart.coupon   || null;
-            let couponCode     = cart.couponCode || "";
+      if (!paymentMethod)
+        return responseHandler.sendfailureResponse(
+          res,
+          "paymentMethod is required",
+          400,
+        );
 
-            // 4. Re-validate coupon at order time
-            if (couponId) {
-                const coupon = await Coupon.findById(couponId);
-                if (!coupon || !coupon.isValid()) {
-                    discountAmount = 0;
-                    couponId       = null;
-                    couponCode     = "";
-                }
-            }
+      if (!["COD", "ONLINE"].includes(paymentMethod))
+        return responseHandler.sendfailureResponse(
+          res,
+          "Invalid payment method",
+          400,
+        );
 
-            const shippingCharge = subtotal - discountAmount >= 999 ? 0 : 99;
-            const totalAmount    = subtotal - discountAmount + shippingCharge;
+      const cart = await Cart.findOne({ user: userId });
 
-            // 5. Create order
-            const order = await Order.create({
-                user: req.user._id,
-                items,
-                shippingAddress,
-                subtotal,
-                discountAmount,
-                shippingCharge,
-                totalAmount,
-                coupon:        couponId,
-                couponCode,
-                paymentMethod,
-                paymentStatus: paymentMethod === "cod" ? "pending" : "pending",
-                status:        "pending",
-            });
+      if (!cart || cart.items.length === 0)
+        return responseHandler.sendfailureResponse(
+          res,
+          "Your cart is empty",
+          400,
+        );
 
-            // 6. Update coupon usageLog + usedCount
-            if (couponId) {
-                await Coupon.findByIdAndUpdate(couponId, {
-                    $inc:  { usedCount: 1 },
-                    $push: {
-                        usageLog: {
-                            user:            req.user._id,
-                            order:           order._id,
-                            discountApplied: discountAmount,
-                        },
-                    },
-                });
-            }
+      const items = cart.items.map((item) => ({
+        product: item.product,
+        variantId: item.variantId,
+        productName: item.productName,
+        size: item.size,
+        colour: item.colour,
+        sku: item.sku ?? "",
+        imageUrl: item.imageUrl ?? "",
+        unitPrice: item.price,
+        quantity: item.quantity,
+        totalPrice: item.price * item.quantity,
+        itemStatus: "active",
+      }));
 
-            // 7. Clear cart
-            cart.items         = [];
-            cart.coupon        = null;
-            cart.couponCode    = "";
-            cart.discountAmount = 0;
-            await cart.save();
+      const subtotal = items.reduce((s, i) => s + i.totalPrice, 0);
 
-            return responseHandler.sendSuccessResponse(res, "Order placed successfully", { order }, 201);
-        } catch (err) {
-            console.error("placeOrder:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
+      let discountAmount = cart.discountAmount || 0;
+      let couponId = cart.coupon || null;
+      let couponCode = cart.couponCode || "";
+
+      if (couponId) {
+        const coupon = await Coupon.findById(couponId);
+        if (!coupon || new Date() > coupon.expiresAt || !coupon.isActive) {
+          discountAmount = 0;
+          couponId = null;
+          couponCode = "";
         }
+      }
+
+      const shippingCharge = subtotal - discountAmount >= 999 ? 0 : 99;
+      const totalAmount = subtotal - discountAmount + shippingCharge;
+
+      const expectedDeliveryAt = new Date();
+      expectedDeliveryAt.setDate(expectedDeliveryAt.getDate() + 7);
+
+      const year = new Date().getFullYear();
+      const orderCount = await Order.countDocuments();
+      const sequence = String(orderCount + 1).padStart(6, "0");
+
+      const orderId = `ORD-${year}-${sequence}`; // show to customer
+      const invoiceNumber = `INV-${year}-${sequence}`;
+
+      const order = await Order.create({
+        user: userId,
+        items,
+        orderId,
+        shippingAddress,
+
+        subtotal,
+        discountAmount,
+        shippingCharge,
+        totalAmount,
+
+        coupon: couponId,
+        couponCode,
+
+        paymentMethod,
+        paymentStatus: "pending",
+
+        status: "pending",
+
+        expectedDeliveryAt,
+        invoiceNumber,
+
+        statusHistory: [
+          {
+            status: "pending",
+            changedAt: new Date(),
+            note: "Order placed by customer",
+          },
+        ],
+      });
+
+      if (couponId) {
+        await Coupon.findByIdAndUpdate(couponId, {
+          $inc: { usedCount: 1 },
+          $push: {
+            usageLog: {
+              user: userId,
+              order: order._id,
+              discountApplied: discountAmount,
+            },
+          },
+        });
+      }
+
+      cart.items = [];
+      cart.coupon = null;
+      cart.couponCode = "";
+      cart.discountAmount = 0;
+      await cart.save();
+
+      const responseItems = [...order.items];
+
+for (const item of responseItems) {
+  if (item.imageUrl && !item.imageUrl.startsWith("http")) {
+    item.imageUrl = await responseHandler.generatePreSignedURL(item.imageUrl);
+  }
+}
+
+      return responseHandler.sendSuccessResponse(
+        res,
+        "Order placed successfully",
+        {
+          order: {
+            _id: order._id,
+            orderId: order.orderId,
+            items: responseItems,
+            shippingAddress: order.shippingAddress,
+            totalAmount: order.totalAmount,
+            shippingCharge: order.shippingCharge,
+            subtotal: order.subtotal,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+            expectedDeliveryAt: order.expectedDeliveryAt,
+          },
+        },
+        201,
+      );
+    } catch (err) {
+      console.error("placeOrder:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
+
+  static getMyOrders = async (req, res) => {
+    try {
+      const { page = 1, limit = 10, status } = req.query;
+      // const userId = "69b5224c62a2eed1cf776717";
+      const userId = req.user || req.admin;
+
+      const filter = { user: userId };
+      if (status) filter.status = status;
+
+      const [total, orders] = await Promise.all([
+        Order.countDocuments(filter),
+        Order.find(filter)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(Number(limit))
+          .lean(),
+      ]);
+
+      const formattedOrders = await Promise.all(
+  orders.map(async (order) => {
+
+    const items = await Promise.all(
+      order.items.map(async (item) => {
+
+        let imageUrl = item.imageUrl;
+
+        if (imageUrl && !imageUrl.startsWith("http")) {
+          imageUrl = await responseHandler.generatePreSignedURL(imageUrl);
+        }
+
+        return {
+          _id: item._id,
+          productName: item.productName,
+          size: item.size,
+          colour: item.colour,
+          imageUrl,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          totalPrice: item.totalPrice,
+          itemStatus: item.itemStatus,
+        };
+
+      })
+    );
+
+    return {
+      _id: order._id,
+      orderId: order.orderId,
+      status: order.status,
+      items,
+      shippingAddress: order.shippingAddress,
+      subtotal: order.subtotal,
+      discountAmount: order.discountAmount,
+      shippingCharge: order.shippingCharge,
+      totalAmount: order.totalAmount,
+      expectedDeliveryAt: order.expectedDeliveryAt,
+      createdAt: order.createdAt,
     };
 
-    /**
-     * GET /api/orders/my
-     * Get logged-in user's orders (paginated)
-     */
-    static getMyOrders = async (req, res) => {
-        try {
-            const { page = 1, limit = 10, status } = req.query;
+  })
+);
 
-            const filter = { user: req.user._id };
-            if (status) filter.status = status;
+      return responseHandler.sendSuccessResponse(res, "Orders fetched", {
+        total,
+        page: Number(page),
+        totalPages: Math.ceil(total / limit),
+        orders: formattedOrders,
+      });
+    } catch (err) {
+      console.error("getMyOrders:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 
-            const [total, orders] = await Promise.all([
-                Order.countDocuments(filter),
-                Order.find(filter)
-                    .select("-items.product -__v")
-                    .sort({ createdAt: -1 })
-                    .skip((page - 1) * limit)
-                    .limit(Number(limit))
-                    .lean(),
-            ]);
+  static getMyOrderById = async (req, res) => {
+    try {
+      // const userId = "69b5224c62a2eed1cf776717";
+      const userId = req.params;
 
-            return responseHandler.sendSuccessResponse(res, "Orders fetched", {
-                total,
-                page:       Number(page),
-                totalPages: Math.ceil(total / limit),
-                orders,
-            });
-        } catch (err) {
-            console.error("getMyOrders:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
+      const { orderId:id } = req.body; // ← from POST body
+
+      if (!id)
+        return responseHandler.sendfailureResponse(
+          res,
+          "orderId is required",
+          400,
+        );
+
+    //   const order = await Order.findOne({
+    //     _id: orderId, // ← from URL
+    //     user: userId,
+    //   })
+        const order = await Order.findById(id)
+        .populate("coupon", "code discountType discountValue")
+        .lean();
+
+      if (!order)
+        return responseHandler.sendfailureResponse(res, "Order not found", 404);
+
+       const items = await Promise.all(
+      order.items.map(async (item) => {
+
+        let imageUrl = item.imageUrl;
+
+        if (imageUrl && !imageUrl.startsWith("http")) {
+          imageUrl = await responseHandler.generatePreSignedURL(imageUrl);
         }
-    };
 
-    /**
-     * GET /api/orders/my/:id
-     * Get single order detail for logged-in user
-     */
-    static getMyOrderById = async (req, res) => {
-        try {
-            const order = await Order.findOne({
-                _id:  req.params.id,
-                user: req.user._id,
-            })
-                .populate("items.product", "name images")
-                .populate("coupon",        "code discountType discountValue")
-                .populate("payment");
+        return {
+          _id: item._id,
+          productName: item.productName,
+          size: item.size,
+          colour: item.colour,
+          imageUrl,
+          unitPrice: item.unitPrice,
+          quantity: item.quantity,
+          totalPrice: item.totalPrice,
+          itemStatus: item.itemStatus,
+        };
+      })
+    );
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+      const formattedOrder = {
+        _id: order._id,
+        orderId: order.orderId,
+        status: order.status,
+        items,
+        shippingAddress: order.shippingAddress,
+        subtotal: order.subtotal,
+        discountAmount: order.discountAmount,
+        shippingCharge: order.shippingCharge,
+        totalAmount: order.totalAmount,
+        coupon: order.coupon,
+        couponCode: order.couponCode,
+        tracking: order.tracking,
+        statusHistory: order.statusHistory,
+        cancellationReason: order.cancellationReason,
+        returnReason: order.returnReason,
+        refundAmount: order.refundAmount,
+        refundStatus: order.refundStatus,
+        expectedDeliveryAt: order.expectedDeliveryAt,
+        confirmedAt: order.confirmedAt,
+        shippedAt: order.shippedAt,
+        deliveredAt: order.deliveredAt,
+        cancelledAt: order.cancelledAt,
+        returnRequestedAt: order.returnRequestedAt,
+        returnedAt: order.returnedAt,
+        createdAt: order.createdAt,
+      };
 
-            return responseHandler.sendSuccessResponse(res, "Order fetched", { order });
-        } catch (err) {
-            console.error("getMyOrderById:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      return responseHandler.sendSuccessResponse(res, "Order fetched", {
+        order: formattedOrder,
+      });
+    } catch (err) {
+      console.error("getMyOrderById:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 
-    /**
-     * PATCH /api/orders/my/:id/cancel
-     * User cancels their own order (only if pending/confirmed)
-     */
-    static cancelMyOrder = async (req, res) => {
-        try {
-            const order = await Order.findOne({
-                _id:  req.params.id,
-                user: req.user._id,
-            });
+  static cancelMyOrder = async (req, res) => {
+    try {
+      // const userId = "69b5224c62a2eed1cf776717";
+      const userId = req.user || req.admin;
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+      const { cancellationReason, orderId:id } = req.body;
 
-            if (!["pending", "confirmed"].includes(order.status))
-                return responseHandler.sendFailureResponse(res, `Order cannot be cancelled in '${order.status}' status`, 400);
+      // console.log(req.params.id, ' req.params.id')
 
-            order.status      = "cancelled";
-            order.cancelledAt = new Date();
-            await order.save();
+      if (!id)
+        return responseHandler.sendfailureResponse(
+          res,
+          "orderId is required",
+          400,
+        );
 
-            return responseHandler.sendSuccessResponse(res, "Order cancelled", { order });
-        } catch (err) {
-            console.error("cancelMyOrder:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      // find by orderId + user so customer can only cancel their own order
+      const order = await Order.findOne({
+        id,
+        user: new mongoose.Types.ObjectId(userId),
+      });
 
-    /**
-     * POST /api/orders/my/:id/return
-     * User requests return (only if delivered)
-     */
-    static requestReturn = async (req, res) => {
-        try {
-            const order = await Order.findOne({
-                _id:  req.params.id,
-                user: req.user._id,
-            });
+      console.log(id, userId, "userdetails");
+      if (!order)
+        return responseHandler.sendfailureResponse(res, "Order not found", 400);
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+      if (!["pending", "confirmed"].includes(order.status))
+        return responseHandler.sendfailureResponse(
+          res,
+          `Order cannot be cancelled in '${order.status}' status`,
+          400,
+        );
 
-            if (order.status !== "delivered")
-                return responseHandler.sendFailureResponse(res, "Return can only be requested for delivered orders", 400);
+      order.status = "cancelled";
+      order.cancelledAt = new Date();
+      order.cancellationReason = cancellationReason ?? "";
 
-            order.status = "return_requested";
-            await order.save();
+      order.items.forEach((item) => {
+        item.itemStatus = "cancelled";
+        item.cancelledAt = new Date();
+      });
 
-            return responseHandler.sendSuccessResponse(res, "Return requested successfully", { order });
-        } catch (err) {
-            console.error("requestReturn:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      order.statusHistory.push({
+        status: "cancelled",
+        changedAt: new Date(),
+        note: cancellationReason ?? "Cancelled by customer",
+      });
 
-    // ══════════════════════════════════════════════════════════════
-    //  ADMIN CONTROLLERS
-    // ══════════════════════════════════════════════════════════════
+      await order.save();
 
-    /**
-     * GET /api/admin/orders
-     * Get all orders with filters + pagination
-     */
-    static getAllOrders = async (req, res) => {
-        try {
-            const {
-                page = 1, limit = 10,
-                status, paymentStatus, paymentMethod,
-                search,
-                startDate, endDate,
-            } = req.query;
+      return responseHandler.sendSuccessResponse(res, "Order cancelled", {
+        order: {
+          _id: order._id,
+          orderId: order.orderId,
+          status: order.status,
+          cancelledAt: order.cancelledAt,
+          cancellationReason: order.cancellationReason,
+          statusHistory: order.statusHistory,
+        },
+      });
+    } catch (err) {
+      console.error("cancelMyOrder:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 
-            const filter = {};
-            if (status)        filter.status        = status;
-            if (paymentStatus) filter.paymentStatus = paymentStatus;
-            if (paymentMethod) filter.paymentMethod = paymentMethod;
+  static requestReturn = async (req, res) => {
+    try {
+      // const userId = "69b5224c62a2eed1cf776717";
+      const userId = req.user || req.admin;
 
-            // search by invoiceNumber
-            if (search) filter.invoiceNumber = { $regex: search, $options: "i" };
+      const { returnReason, orderId } = req.body;
 
-            // date range
-            if (startDate || endDate) {
-                filter.createdAt = {};
-                if (startDate) filter.createdAt.$gte = new Date(startDate);
-                if (endDate)   filter.createdAt.$lte = new Date(endDate);
-            }
+      if (!orderId)
+        return responseHandler.sendfailureResponse(
+          res,
+          "orderId is required",
+          400,
+        );
 
-            const [total, orders] = await Promise.all([
-                Order.countDocuments(filter),
-                Order.find(filter)
-                    .populate("user",   "name email phone")
-                    .populate("coupon", "code")
-                    .sort({ createdAt: -1 })
-                    .skip((page - 1) * limit)
-                    .limit(Number(limit))
-                    .lean(),
-            ]);
+      const order = await Order.findOne({
+        _id: req.params.id,
+        user: userId,
+        orderId,
+      });
 
-            return responseHandler.sendSuccessResponse(res, "Orders fetched", {
-                total,
-                page:       Number(page),
-                totalPages: Math.ceil(total / limit),
-                orders,
-            });
-        } catch (err) {
-            console.error("getAllOrders:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      if (!order)
+        return responseHandler.sendfailureResponse(res, "Order not found", 404);
 
-    /**
-     * GET /api/admin/orders/:id
-     * Get full order detail
-     */
-    static getOrderById = async (req, res) => {
-        try {
-            const order = await Order.findById(req.params.id)
-                .populate("user",          "name email phone")
-                .populate("items.product", "name images")
-                .populate("coupon",        "code discountType discountValue")
-                .populate("payment");
+      if (order.status !== "delivered")
+        return responseHandler.sendfailureResponse(
+          res,
+          "Return can only be requested for delivered orders",
+          400,
+        );
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+      order.status = "return_requested";
+      order.returnRequestedAt = new Date();
+      order.returnReason = returnReason ?? "";
 
-            return responseHandler.sendSuccessResponse(res, "Order fetched", { order });
-        } catch (err) {
-            console.error("getOrderById:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      order.statusHistory.push({
+        status: "return_requested",
+        changedAt: new Date(),
+        note: returnReason ?? "Return requested by customer",
+      });
 
-    /**
-     * PATCH /api/admin/orders/:id/status
-     * Admin updates order status
-     */
-    static updateOrderStatus = async (req, res) => {
-        try {
-            const { status } = req.body;
+      await order.save();
 
-            const validStatuses = [
-                "pending", "confirmed", "processing",
-                "shipped", "delivered", "cancelled",
-                "return_requested", "returned",
-            ];
+      return responseHandler.sendSuccessResponse(
+        res,
+        "Return requested successfully",
+        {
+          order: {
+            _id: order._id,
+            orderId: order.orderId,
+            status: order.status,
+            returnRequestedAt: order.returnRequestedAt,
+            returnReason: order.returnReason,
+            statusHistory: order.statusHistory,
+          },
+        },
+      );
+    } catch (err) {
+      console.error("requestReturn:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 
-            if (!status || !validStatuses.includes(status))
-                return responseHandler.sendFailureResponse(res, `Invalid status. Must be one of: ${validStatuses.join(", ")}`, 400);
+  static getAllOrders = async (req, res) => {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        status,
+        search,
+        startDate,
+        endDate,
+      } = req.query;
 
-            const order = await Order.findById(req.params.id);
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+      const filter = {};
+      if (status) filter.status = status;
 
-            order.status = status;
+      // search by invoiceNumber OR orderId OR customer name
+      if (search) {
+        filter.$or = [
+          { invoiceNumber: { $regex: search, $options: "i" } },
+          { orderId: { $regex: search, $options: "i" } },
+        ];
+      }
 
-            // Auto-set timestamps
-            if (status === "confirmed")  order.confirmedAt = new Date();
-            if (status === "shipped")    order.shippedAt   = new Date();
-            if (status === "delivered")  order.deliveredAt = new Date();
-            if (status === "cancelled")  order.cancelledAt = new Date();
+      if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) filter.createdAt.$gte = new Date(startDate);
+        if (endDate) filter.createdAt.$lte = new Date(endDate);
+      }
 
-            await order.save();
+      const [total, orders] = await Promise.all([
+        Order.countDocuments(filter),
+        Order.find(filter)
+          .populate("user", "name email phone")
+          .populate("coupon", "code")
+          .select("-__v -statusHistory")
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(Number(limit))
+          .lean(),
+      ]);
 
-            return responseHandler.sendSuccessResponse(res, `Order status updated to '${status}'`, { order });
-        } catch (err) {
-            console.error("updateOrderStatus:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      return responseHandler.sendSuccessResponse(res, "Orders fetched", {
+        total,
+        page: Number(page),
+        totalPages: Math.ceil(total / limit),
+        orders,
+      });
+    } catch (err) {
+      console.error("getAllOrders:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 
-    /**
-     * PATCH /api/admin/orders/:id/tracking
-     * Admin adds tracking number + courier
-     */
-    static updateTracking = async (req, res) => {
-        try {
-            const { trackingNumber, courierPartner } = req.body;
+  static getOrderById = async (req, res) => {
+    try {
+      // payment is commented out in schema — removed from populate
+      const order = await Order.findById(req.params.id)
+        .populate("user", "name email phone")
+        .populate("coupon", "code discountType discountValue")
+        .select("-__v");
 
-            if (!trackingNumber || !courierPartner)
-                return responseHandler.sendFailureResponse(res, "trackingNumber and courierPartner are required", 400);
+      if (!order)
+        return responseHandler.sendfailureResponse(res, "Order not found", 404);
 
-            const order = await Order.findByIdAndUpdate(
-                req.params.id,
-                { $set: { trackingNumber, courierPartner, status: "shipped", shippedAt: new Date() } },
-                { new: true }
-            );
+      return responseHandler.sendSuccessResponse(res, "Order fetched", {
+        order,
+      });
+    } catch (err) {
+      console.error("getOrderById:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+  static updateOrderStatus = async (req, res) => {
+    try {
+      const { status, note } = req.body;
 
-            return responseHandler.sendSuccessResponse(res, "Tracking updated", { order });
-        } catch (err) {
-            console.error("updateTracking:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      const validStatuses = [
+        "pending",
+        "confirmed",
+        "processing",
+        "shipped",
+        "delivered",
+        "cancelled",
+        "return_requested",
+        "returned",
+      ];
 
-    /**
-     * PATCH /api/admin/orders/:id/payment-status
-     * Admin updates payment status
-     */
-    static updatePaymentStatus = async (req, res) => {
-        try {
-            const { paymentStatus } = req.body;
+      if (!status || !validStatuses.includes(status))
+        return responseHandler.sendfailureResponse(
+          res,
+          `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+          400,
+        );
 
-            const validStatuses = ["pending", "paid", "failed", "refunded", "partially_refunded"];
-            if (!paymentStatus || !validStatuses.includes(paymentStatus))
-                return responseHandler.sendFailureResponse(res, `Invalid paymentStatus. Must be one of: ${validStatuses.join(", ")}`, 400);
+      const order = await Order.findById(req.params.id);
+      if (!order)
+        return responseHandler.sendfailureResponse(res, "Order not found", 404);
 
-            const order = await Order.findByIdAndUpdate(
-                req.params.id,
-                { $set: { paymentStatus } },
-                { new: true }
-            );
+      order.status = status;
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+      // set the relevant timestamp
+      if (status === "confirmed") order.confirmedAt = new Date();
+      if (status === "shipped") order.shippedAt = new Date();
+      if (status === "delivered") order.deliveredAt = new Date();
+      if (status === "cancelled") order.cancelledAt = new Date();
+      if (status === "return_requested") order.returnRequestedAt = new Date();
+      if (status === "returned") order.returnedAt = new Date();
 
-            return responseHandler.sendSuccessResponse(res, "Payment status updated", { order });
-        } catch (err) {
-            console.error("updatePaymentStatus:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      order.statusHistory.push({
+        status,
+        changedAt: new Date(),
+        note: note ?? `Status changed to ${status} by admin`,
+      });
 
-    /**
-     * PATCH /api/admin/orders/:id/notes
-     * Admin adds internal notes to an order
-     */
-    static updateAdminNotes = async (req, res) => {
-        try {
-            const { adminNotes } = req.body;
+      await order.save();
 
-            const order = await Order.findByIdAndUpdate(
-                req.params.id,
-                { $set: { adminNotes } },
-                { new: true }
-            );
+      return responseHandler.sendSuccessResponse(
+        res,
+        `Order status updated to '${status}'`,
+        { order },
+      );
+    } catch (err) {
+      console.error("updateOrderStatus:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order not found", 404);
+  // tracking is nested object in schema: order.tracking.trackingNumber etc.
+  static updateTracking = async (req, res) => {
+    try {
+      const { trackingNumber, courierPartner, trackingUrl } = req.body;
 
-            return responseHandler.sendSuccessResponse(res, "Notes updated", { order });
-        } catch (err) {
-            console.error("updateAdminNotes:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      if (!trackingNumber || !courierPartner)
+        return responseHandler.sendfailureResponse(
+          res,
+          "trackingNumber and courierPartner are required",
+          400,
+        );
 
-    /**
-     * PATCH /api/admin/orders/:id/item/:itemId/status
-     * Admin updates individual item status (cancel/return a single item)
-     */
-    static updateItemStatus = async (req, res) => {
-        try {
-            const { itemId } = req.params;
-            const { itemStatus } = req.body;
+      const order = await Order.findById(req.params.id);
+      if (!order)
+        return responseHandler.sendfailureResponse(res, "Order not found", 404);
 
-            const validStatuses = ["active", "cancelled", "return_requested", "returned"];
-            if (!itemStatus || !validStatuses.includes(itemStatus))
-                return responseHandler.sendFailureResponse(res, `Invalid itemStatus. Must be one of: ${validStatuses.join(", ")}`, 400);
+      // nested tracking object — matches schema: tracking: { trackingNumber, courierPartner, trackingUrl }
+      order.tracking = {
+        trackingNumber,
+        courierPartner,
+        trackingUrl: trackingUrl ?? "",
+      };
 
-            const order = await Order.findOneAndUpdate(
-                { _id: req.params.id, "items._id": itemId },
-                { $set: { "items.$.itemStatus": itemStatus } },
-                { new: true }
-            );
+      order.status = "shipped";
+      order.shippedAt = new Date();
 
-            if (!order)
-                return responseHandler.sendFailureResponse(res, "Order or item not found", 404);
+      order.statusHistory.push({
+        status: "shipped",
+        changedAt: new Date(),
+        note: `Shipped via ${courierPartner} — ${trackingNumber}`,
+      });
 
-            return responseHandler.sendSuccessResponse(res, "Item status updated", { order });
-        } catch (err) {
-            console.error("updateItemStatus:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      await order.save();
 
-    /**
-     * GET /api/admin/orders/stats
-     * Basic order stats for dashboard
-     */
-    static getOrderStats = async (req, res) => {
-        try {
-            const [stats] = await Order.aggregate([
-                {
-                    $group: {
-                        _id:            null,
-                        totalOrders:    { $sum: 1 },
-                        totalRevenue:   { $sum: "$totalAmount" },
-                        totalDiscount:  { $sum: "$discountAmount" },
-                        avgOrderValue:  { $avg: "$totalAmount" },
-                        pendingOrders:  { $sum: { $cond: [{ $eq: ["$status", "pending"] },    1, 0] } },
-                        shippedOrders:  { $sum: { $cond: [{ $eq: ["$status", "shipped"] },    1, 0] } },
-                        deliveredOrders:{ $sum: { $cond: [{ $eq: ["$status", "delivered"] },  1, 0] } },
-                        cancelledOrders:{ $sum: { $cond: [{ $eq: ["$status", "cancelled"] },  1, 0] } },
-                    },
+      return responseHandler.sendSuccessResponse(res, "Tracking updated", {
+        order,
+      });
+    } catch (err) {
+      console.error("updateTracking:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
+
+  // paymentStatus is commented out in schema — removed this controller
+  // uncomment paymentStatus in schema first, then uncomment below
+  // static updatePaymentStatus = async (req, res) => { ... };
+
+  static updateAdminNotes = async (req, res) => {
+    try {
+      const { adminNotes } = req.body;
+
+      const order = await Order.findByIdAndUpdate(
+        req.params.id,
+        { $set: { adminNotes } },
+        { new: true },
+      );
+
+      if (!order)
+        return responseHandler.sendfailureResponse(res, "Order not found", 404);
+
+      return responseHandler.sendSuccessResponse(res, "Notes updated", {
+        order,
+      });
+    } catch (err) {
+      console.error("updateAdminNotes:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
+
+  static updateItemStatus = async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      const { itemStatus, cancellationReason, returnReason } = req.body;
+
+      const validStatuses = [
+        "active",
+        "cancelled",
+        "return_requested",
+        "returned",
+        "refunded",
+      ];
+      if (!itemStatus || !validStatuses.includes(itemStatus))
+        return responseHandler.sendfailureResponse(
+          res,
+          `Invalid itemStatus. Must be one of: ${validStatuses.join(", ")}`,
+          400,
+        );
+
+      const update = { "items.$.itemStatus": itemStatus };
+      if (itemStatus === "cancelled") {
+        update["items.$.cancelledAt"] = new Date();
+        update["items.$.cancellationReason"] = cancellationReason ?? "";
+      }
+      if (itemStatus === "returned") {
+        update["items.$.returnedAt"] = new Date();
+        update["items.$.returnReason"] = returnReason ?? "";
+      }
+
+      const order = await Order.findOneAndUpdate(
+        { _id: req.params.id, "items._id": itemId },
+        { $set: update },
+        { new: true },
+      );
+
+      if (!order)
+        return responseHandler.sendfailureResponse(
+          res,
+          "Order or item not found",
+          404,
+        );
+
+      return responseHandler.sendSuccessResponse(res, "Item status updated", {
+        order,
+      });
+    } catch (err) {
+      console.error("updateItemStatus:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
+
+  static getOrderStats = async (req, res) => {
+    try {
+      const [stats] = await Order.aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            revenue: { $sum: "$totalAmount" },
+            totalDiscount: { $sum: "$discountAmount" },
+            avgOrderValue: { $avg: "$totalAmount" },
+            pending: {
+              $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] },
+            },
+            shipped: {
+              $sum: { $cond: [{ $eq: ["$status", "shipped"] }, 1, 0] },
+            },
+            delivered: {
+              $sum: { $cond: [{ $eq: ["$status", "delivered"] }, 1, 0] },
+            },
+            cancelled: {
+              $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] },
+            },
+          },
+        },
+        // monthly breakdown for charts
+        {
+          $lookup: {
+            from: "orders",
+            pipeline: [
+              {
+                $group: {
+                  _id: {
+                    year: { $year: "$createdAt" },
+                    month: { $month: "$createdAt" },
+                  },
+                  orders: { $sum: 1 },
+                  revenue: { $sum: "$totalAmount" },
                 },
-            ]);
+              },
+              { $sort: { "_id.year": 1, "_id.month": 1 } },
+              {
+                $project: {
+                  _id: 0,
+                  month: {
+                    $dateToString: {
+                      format: "%b",
+                      date: {
+                        $dateFromParts: {
+                          year: "$_id.year",
+                          month: "$_id.month",
+                          day: 1,
+                        },
+                      },
+                    },
+                  },
+                  orders: 1,
+                  revenue: 1,
+                },
+              },
+            ],
+            as: "monthly",
+          },
+        },
+      ]);
 
-            return responseHandler.sendSuccessResponse(res, "Stats fetched", { stats: stats || {} });
-        } catch (err) {
-            console.error("getOrderStats:", err);
-            return responseHandler.sendFailureResponse(res, "Server error", 500);
-        }
-    };
+      return responseHandler.sendSuccessResponse(
+        res,
+        "Stats fetched",
+        stats ?? {},
+      );
+    } catch (err) {
+      console.error("getOrderStats:", err);
+      return responseHandler.sendfailureResponse(res, "Server error", 500);
+    }
+  };
 }
 
 export default OrderController;

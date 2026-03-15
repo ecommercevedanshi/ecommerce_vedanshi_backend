@@ -1,31 +1,163 @@
 import Product from "./product.model.js";
 import Category from "../categories/categories.model.js"
 import responseHandler from "../../shared/responseHandler.js";
+import generateProductImageUrls from "../../shared/generateProductImageUrls.js";
 
 class ProductController {
 
 
-    static async getAllProducts(req, res, next) {
-        try {
+//     static async getAllProducts(req, res, next) {
+//   try {
 
-            const products = await Product.find({
-                status: "active",
-                visibility: "public",
-                isArchived: false
-            })
-                .populate("category", "name slug")
-                .populate("subCategory", "name slug");
+//     const products = await Product.find({
+//       status: "active",
+//       visibility: "public",
+//       isArchived: false
+//     })
+//     .populate("category", "name slug")
+//     .populate("subCategory", "name slug")
+//     .lean();
 
-            return responseHandler.sendSuccessResponse(
-                res,
-                "Products fetched successfully",
-                { products }
-            );
+//     const formatted = await Promise.all(
+//       products.map(async (product) => {
 
-        } catch (error) {
-            next(error);
-        }
+//         product.images = await generateProductImageUrls(product.images);
+
+//         return product;
+//       })
+//     );
+
+//     return responseHandler.sendSuccessResponse(
+//       res,
+//       "Products fetched successfully",
+//       { products: formatted }
+//     );
+
+//   } catch (error) {
+//     next(error);
+//   }
+// }
+
+static async getAllProducts(req, res, next) {
+  try {
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12;
+
+    const skip = (page - 1) * limit;
+
+    const products = await Product.find({
+      status: "active",
+      visibility: "public",
+      isArchived: false
+    })
+      .populate("category", "name slug")
+      .populate("subCategory", "name slug")
+      .select("name slug images minPrice mrp variants reviews category subCategory")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const formattedProducts = [];
+
+    for (const product of products) {
+
+      const images = await generateProductImageUrls(product.images);
+
+      const primaryImages = images
+        ?.sort((a, b) => a.sortOrder - b.sortOrder)
+        ?.slice(0, 2)
+        ?.map((img) => img.url)
+        ?.filter(Boolean);
+
+      const stock =
+        product.variants?.reduce(
+          (sum, v) => sum + (v.stockQty || 0),
+          0
+        ) || 0;
+
+      if (stock <= 0) continue;
+
+      
+const category = await Category.findOne({ name: product.category }).lean();
+// console.log(product)
+const subCategory = await Category.findOne({ name: product.subCategory }).lean();
+
+      formattedProducts.push({
+        id: product._id,
+        name: product.name,
+        slug: product.slug,
+
+        images: primaryImages,
+
+        category: category?.slug,
+  subCategory: subCategory?.slug,
+
+        price: product.minPrice,
+        discountPrice: product.mrp,
+
+        reviews: product.reviews?.length || 0,
+
+        stock
+      });
     }
+
+    const totalProducts = await Product.countDocuments({
+      status: "active",
+      visibility: "public",
+      isArchived: false
+    });
+
+    return responseHandler.sendSuccessResponse(
+      res,
+      "Products fetched successfully",
+      {
+        products: formattedProducts,
+        page,
+        totalPages: Math.ceil(totalProducts / limit),
+        totalProducts
+      }
+    );
+
+  } catch (error) {
+    next(error);
+  }
+}
+
+ static async getProductDetails(req, res) {
+  try {
+
+    const { slug } = req.params;
+
+    const product = await Product.findOne({slug}).lean();
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found",
+      });
+    }
+
+    product.images = await generateProductImageUrls(product.images);
+
+    res.status(200).json({
+      success: true,
+      message: "Product details fetched successfully",
+      data: product,
+    });
+
+  } catch (error) {
+
+    console.error("getProductDetails error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching product",
+    });
+
+  }
+}
 
     // GET /api/products/featured
     static async getFeaturedProducts(req, res, next) {
@@ -117,95 +249,295 @@ class ProductController {
     //         next(error);
     //     }
     // }
-    static async getProductsByCategory(req, res, next) {
-        try {
-            const { slug } = req.params;
 
-            const category = await Category.findOne({ slug });
-            if (!category) {
-                return responseHandler.sendfailureResponse(res, "Category not found", 404);
-            }
+    // -------------------------------//
+    // static async getProductsByCategory(req, res, next) {
+    //     try {
+    //         const { slug } = req.params;
 
-            const products = await Product.find({
-                category: category.name,
-                status: "active",
-                visibility: "public",
-                isArchived: false,
-            })
-                .select("name images mrp minPrice variants reviews")
-                .sort({ createdAt: -1 });
+    //         const category = await Category.findOne({ slug });
+    //         if (!category) {
+    //             return responseHandler.sendfailureResponse(res, "Category not found", 404);
+    //         }
 
-            const formatted = products.map((product) => {
-                const totalStock = product.variants.reduce(
-                    (sum, variant) => sum + (variant.stockQty || 0),
-                    0
-                );
+    //         const products = await Product.find({
+    //             category: category.name,
+    //             status: "active",
+    //             visibility: "public",
+    //             isArchived: false,
+    //         })
+    //             .select("name images mrp minPrice variants reviews")
+    //             .sort({ createdAt: -1 });
 
-                return {
-                    name: product.name,
-                    images: product.images.slice(0, 2),
-                    reviews: product.reviews ?? [],
-                    price: product.minPrice,
-                    discountPrice: product.mrp,
-                    totalStock,
-                };
-            });
+    //         const formatted = products.map((product) => {
+    //             const totalStock = product.variants.reduce(
+    //                 (sum, variant) => sum + (variant.stockQty || 0),
+    //                 0
+    //             );
 
-            return responseHandler.sendSuccessResponse(res, "Products fetched by category", formatted);
-        } catch (error) {
-            next(error);
-        }
+    //             return {
+    //                 name: product.name,
+    //                 images: product.images.slice(0, 2),
+    //                 reviews: product.reviews ?? [],
+    //                 price: product.minPrice,
+    //                 discountPrice: product.mrp,
+    //                 totalStock,
+    //             };
+    //         });
+
+    //         return responseHandler.sendSuccessResponse(res, "Products fetched by category", formatted);
+    //     } catch (error) {
+    //         next(error);
+    //     }
+    // }
+
+static async getProductsByCategory(req, res, next) {
+  try {
+
+    const { slug } = req.params;
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12;
+
+    const skip = (page - 1) * limit;
+
+    const category = await Category.findOne({ slug });
+
+    if (!category) {
+      return responseHandler.sendfailureResponse(
+        res,
+        "Category not found",
+        404
+      );
     }
+
+    const products = await Product.find({
+      category: category.name,
+      status: "active",
+      visibility: "public",
+      isArchived: false,
+    })
+      .select("name slug images mrp minPrice variants reviews")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const formatted = await Promise.all(
+      products.map(async (product) => {
+
+        const images = await generateProductImageUrls(product.images);
+
+        const totalStock =
+          product.variants?.reduce(
+            (sum, variant) => sum + (variant.stockQty || 0),
+            0
+          ) || 0;
+
+        return {
+          name: product.name,
+          slug: product.slug,
+          images: images.slice(0, 2).map(i => i.url),
+          reviews: product.reviews ?? [],
+          price: product.minPrice,
+          discountPrice: product.mrp,
+          totalStock
+        };
+      })
+    );
+
+    const totalProducts = await Product.countDocuments({
+      category: category.name,
+      status: "active",
+      visibility: "public",
+      isArchived: false,
+    });
+
+    return responseHandler.sendSuccessResponse(
+      res,
+      "Products fetched by category",
+      {
+        products: formatted,
+        page,
+        totalPages: Math.ceil(totalProducts / limit),
+        totalProducts
+      }
+    );
+
+  } catch (error) {
+    next(error);
+  }
+}
 
     // GET /api/products/subcategory/:slug
-    static async getProductsBySubCategory(req, res, next) {
-        try {
-            const { slug } = req.params;
+    // static async getProductsBySubCategory(req, res, next) {
+    //     try {
+    //         const { slug } = req.params;
 
-            const subCategory = await Category.findOne({ slug });
-            if (!subCategory) {
-                return responseHandler.sendfailureResponse(res, "SubCategory not found", 404);
-            }
+    //         // console.log(slug)
 
-            const products = await Product.find({
-                subCategory: subCategory._id,
-                status: "active",
-                visibility: "public",
-                isArchived: false,
-            })
-                .populate("category", "name slug")
-                .populate("subCategory", "name slug")
-                .sort({ createdAt: -1 });
+    //         const subCategory = await Category.findOne({ slug });
+    //         // console.log(subCategory)
+    //         if (!subCategory) {
+    //             return responseHandler.sendfailureResponse(res, "SubCategory not found", 404);
+    //         }
 
-            return responseHandler.sendSuccessResponse(res, "Products fetched by subcategory", products);
-        } catch (error) {
-            next(error);
-        }
+    //         const products = await Product.find({
+    //             subCategory: subCategory.name,
+    //             status: "active",
+    //             visibility: "public",
+    //             isArchived: false,
+    //         })
+    //             .populate("category", "name slug")
+    //             .populate("subCategory", "name slug")
+    //             .sort({ createdAt: -1 });
+
+    //         return responseHandler.sendSuccessResponse(res, "Products fetched by subcategory", products);
+    //     } catch (error) {
+    //         next(error);
+    //     }
+    // }
+
+static async getProductsBySubCategory(req, res, next) {
+  try {
+
+    const { slug } = req.params;
+
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12;
+
+    const skip = (page - 1) * limit;
+
+    const subCategory = await Category.findOne({ slug });
+
+    if (!subCategory) {
+      return responseHandler.sendfailureResponse(
+        res,
+        "SubCategory not found",
+        404
+      );
     }
+
+    const products = await Product.find({
+      subCategory: subCategory.name,
+      status: "active",
+      visibility: "public",
+      isArchived: false
+    })
+      .select("name slug images mrp minPrice variants reviews status category subCategory")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const formattedProducts = [];
+
+    for (const product of products) {
+
+  const images = await generateProductImageUrls(product.images);
+
+//   console.log(images);
+
+  const primaryImages = images
+  ?.sort((a, b) => a.sortOrder - b.sortOrder)
+  ?.slice(0, 2)
+  ?.map((img) => img.url)
+  ?.filter(Boolean);
+
+  let stock = product.variants?.reduce(
+    (sum, v) => sum + (v.stockQty || 0),
+    0
+  ) || 0;
+
+  if (stock <= 0) {
+
+    if (product.status !== "inactive") {
+      await Product.updateOne(
+        { _id: product._id },
+        { status: "inactive" }
+      );
+    }
+
+    continue;
+  }
+
+const category = await Category.findOne({ name: product.category }).lean();
+// console.log(product)
+const subCategory = await Category.findOne({ name: product.subCategory }).lean();
+
+formattedProducts.push({
+  id: product._id,
+  name: product.name,
+  slug: product.slug,
+  images: primaryImages,
+  reviews: product.reviews ?? [],
+  price: product.minPrice,
+  discountPrice: product.mrp,
+  category: category?.slug,
+  subCategory: subCategory?.slug,
+  stock
+});
+}
+
+    const totalProducts = await Product.countDocuments({
+      subCategory: subCategory.name,
+      status: "active",
+      visibility: "public",
+      isArchived: false
+    });
+
+    return responseHandler.sendSuccessResponse(
+      res,
+      "Products fetched by subcategory",
+      {
+        products: formattedProducts,
+        page,
+        totalPages: Math.ceil(totalProducts / limit),
+        totalProducts
+      }
+    );
+
+  } catch (error) {
+    next(error);
+  }
+}
 
     // GET /api/products/:slug
     static async getProductBySlug(req, res, next) {
-        try {
-            const { slug } = req.params;
+  try {
 
-            const product = await Product.findOne({
-                slug,
-                status: "active",
-                visibility: "public",
-                isArchived: false,
-            })
-                .populate("category", "name slug")
-                .populate("subCategory", "name slug");
+    const { slug } = req.params;
 
-            if (!product) {
-                return responseHandler.sendfailureResponse(res, "Product not found", 404);
-            }
+    const product = await Product.findOne({
+      slug,
+      status: "active",
+      visibility: "public",
+      isArchived: false,
+    })
+      .populate("category", "name slug")
+      .populate("subCategory", "name slug")
+      .lean();
 
-            return responseHandler.sendSuccessResponse(res, "Product fetched", product);
-        } catch (error) {
-            next(error);
-        }
+    if (!product) {
+      return responseHandler.sendfailureResponse(
+        res,
+        "Product not found",
+        404
+      );
     }
+
+    product.images = await generateProductImageUrls(product.images);
+
+    return responseHandler.sendSuccessResponse(
+      res,
+      "Product fetched",
+      product
+    );
+
+  } catch (error) {
+    next(error);
+  }
+}
 
     // 🔐 ADMIN SIDE
 
@@ -270,6 +602,7 @@ class ProductController {
 
             return responseHandler.sendSuccessResponse(res, "Product fetched", product);
         } catch (error) {
+            console.log(error)
             next(error);
         }
     }

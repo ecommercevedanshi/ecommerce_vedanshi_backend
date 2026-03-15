@@ -115,11 +115,15 @@ export const Auth = async (req, res, next) => {
         if (err.name === "TokenExpiredError") {
           return responseHandler.sendfailureResponse(res, "Token expired, please refresh the token", 401);
         }
-        return responseHandler.sendfailureResponse(res, "Invalid Token");
+        return responseHandler.sendfailureResponse(res, "Invalid Token", 401);
       }
+
+      console.log(decode)
 
 
       let findUser = await User.findById(decode.userId);
+
+      // console.log(decode)
 
       if (!findUser) {
         return responseHandler.sendfailureResponse(res, "Invalid User", 400);
